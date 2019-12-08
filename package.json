@@ -1,0 +1,26 @@
+{
+  "name": "webd2075-as5",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/markfarrell/webd2075-as5.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/markfarrell/webd2075-as5/issues"
+  },
+  "homepage": "https://github.com/markfarrell/webd2075-as5#readme",
+  "dependencies": {
+    "sqlite3": "^4.1.0",
+    "syslog-client": "^1.1.1"
+  }
+}
