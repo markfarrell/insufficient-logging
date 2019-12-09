@@ -1,11 +1,12 @@
 module DB
- ( Request
- , RequestDSL
+ ( RequestDSL
+ , Interpreter
+ , Request
+ , Result
  , close
  , connect
  , all 
  , runRequest
- , runQuery
  ) where
 
 import Prelude
@@ -13,14 +14,15 @@ import Prelude
 import Control.Monad.Free.Trans (FreeT, liftFreeT, runFreeT)
 import Control.Monad.Error.Class (try)
 import Control.Monad.Trans.Class (lift)
+import Control.Monad.Writer.Trans (WriterT, runWriterT)
 
-import Data.Either (Either(..))
+import Data.Either (Either)
+import Data.Tuple (Tuple)
 
 import Effect.Aff (Aff)
 import Effect.Exception (Error)
 
 import SQLite3 as SQLite3
-import Syslog (Facility(..), Severity(..), log)
 
 data RequestDSL a = Close SQLite3.Database (Unit -> a)
   | Connect String SQLite3.Mode (SQLite3.Database -> a) 
@@ -32,7 +34,11 @@ instance functorRequestDSL :: Functor RequestDSL where
   map f (Connect filename mode next) = (Connect filename mode (f <<< next))
   map f (All query database next) = (All query database (f <<< next))
 
-type Request a = FreeT RequestDSL Aff a
+type Interpreter = WriterT (Array String) Aff 
+
+type Request a = FreeT RequestDSL Interpreter a
+
+type Result a = Either Error (Tuple a (Array String))
 
 close :: SQLite3.Database -> Request Unit
 close database = liftFreeT $ (Close database identity)
@@ -43,29 +49,16 @@ connect filename mode = liftFreeT $ (Connect filename mode identity)
 all :: String -> SQLite3.Database -> Request (Array SQLite3.Row)
 all query database = liftFreeT $ (All query database identity)
 
-runInterpret :: forall a. RequestDSL (Request a) -> Aff (Request a)
-runInterpret (Close database next) = do 
+interpret :: forall a. RequestDSL (Request a) -> Interpreter (Request a)
+interpret (Close database next) = lift $ do 
   result <- SQLite3.close database
   pure $ next result
-runInterpret (Connect filename mode next) = do
+interpret (Connect filename mode next) = lift $ do
   result <- SQLite3.connect filename mode
   pure $ next result 
-runInterpret (All query database next) = do
+interpret (All query database next) = lift $ do
   result <- SQLite3.all query database
   pure $ next result
  
-runRequest ::  forall a. Show a => Request a -> Aff (Either Error a)
-runRequest request = do
-  result <- try $ runFreeT runInterpret request
-  pure result
-
-interpretQuery :: String -> SQLite3.Mode -> String -> Request (Array SQLite3.Row)
-interpretQuery filename mode query = do
-  database <- connect filename mode 
-  rows     <- all query database
-  _        <- close database
-  lift $ pure rows
-
-runQuery :: String -> SQLite3.Mode -> String -> Aff (Either Error (Array SQLite3.Row))
-runQuery filename mode query = runRequest $ interpretQuery filename mode query
-  
+runRequest ::  forall a. Request a -> Aff (Result a)
+runRequest request = try $ runWriterT $ runFreeT interpret request
