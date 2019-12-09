@@ -14,6 +14,9 @@ import Effect.Aff.Compat (EffectFnAff, fromEffectFnAff)
 
 data Mode = OpenReadOnly
 
+instance showMode :: Show Mode where
+  show OpenReadOnly = "OPEN_READONLY"
+
 mode' :: Mode -> Int
 mode' OpenReadOnly = 1
 

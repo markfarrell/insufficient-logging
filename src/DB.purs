@@ -14,6 +14,7 @@ import Prelude
 import Control.Monad.Free.Trans (FreeT, liftFreeT, runFreeT)
 import Control.Monad.Error.Class (try)
 import Control.Monad.Trans.Class (lift)
+import Control.Monad.Writer.Class (tell)
 import Control.Monad.Writer.Trans (WriterT, runWriterT)
 
 import Data.Either (Either)
@@ -50,15 +51,18 @@ all :: String -> SQLite3.Database -> Request (Array SQLite3.Row)
 all query database = liftFreeT $ (All query database identity)
 
 interpret :: forall a. RequestDSL (Request a) -> Interpreter (Request a)
-interpret (Close database next) = lift $ do 
-  result <- SQLite3.close database
-  pure $ next result
-interpret (Connect filename mode next) = lift $ do
-  result <- SQLite3.connect filename mode
-  pure $ next result 
-interpret (All query database next) = lift $ do
-  result <- SQLite3.all query database
-  pure $ next result
+interpret (Close database next) = do 
+  _      <- tell ["CLOSE"]
+  result <- lift $ next <$> SQLite3.close database
+  lift $ pure result
+interpret (Connect filename mode next) = do
+  _      <- tell [show ["CONNECT",filename,show mode]]
+  result <- lift $ next <$> SQLite3.connect filename mode
+  lift $ pure result 
+interpret (All query database next) = do
+  _      <- tell [show ["ALL",query]]
+  result <- lift $ next <$> SQLite3.all query database
+  lift $ pure result
  
 runRequest ::  forall a. Request a -> Aff (Result a)
 runRequest request = try $ runWriterT $ runFreeT interpret request
