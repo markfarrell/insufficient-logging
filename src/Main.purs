@@ -10,6 +10,7 @@ import Control.Monad.Rec.Class (forever)
 import Control.Monad.Trans.Class (lift)
 
 import Data.Either(Either(..))
+import Data.Tuple(Tuple(..))
 
 import Effect (Effect)
 import Effect.Aff (Aff, launchAff)
@@ -105,23 +106,31 @@ parseRoute = parseInsertMessage
 
 data ContentType a = TextHTML a
 
-data ResponseType a = Ok (ContentType a) | BadRequest String
+data ResponseType a = Ok (ContentType a) | InternalServerError a | BadRequest String
 
 instance showContentType :: (Show a) => Show (ContentType a) where
   show (TextHTML x) = "TextHTML (" <> show x <> ")"
 
 instance showResponseType :: (Show a) => Show (ResponseType a) where
-  show (Ok x)       = "Ok (" <> show x <> ")"
-  show (BadRequest path) = "BadRequest " <> show path
+  show (Ok x)                  = "Ok (" <> show x <> ")"
+  show (InternalServerError x) = "InternalServerError (" <> show x <> ")"
+  show (BadRequest path)       = "BadRequest " <> show path
 
 runRoute :: HTTP.IncomingMessage -> Aff (ResponseType Route)
 runRoute req  = do
   result <- pure $ flip runParser parseRoute $ HTTP.messageURL req
   case result of
-    (Left error)  -> do
-      pure $ BadRequest (HTTP.messageURL req)
+    (Left _)                        -> pure $ BadRequest (HTTP.messageURL req)
     (Right (InsertMessage message)) -> do
-      pure $ Ok (TextHTML (InsertMessage message))
+      result' <- DB.runRequest $ insertMessage filename message
+      case result' of
+        (Left error)             -> do 
+           _ <- audit $ Message Failure DatabaseRequest (show error) 
+           pure $ InternalServerError (InsertMessage message)
+        (Right (Tuple _ steps)) -> do
+           _ <- audit $ Message Success DatabaseRequest (show steps) 
+           pure $ Ok (TextHTML (InsertMessage message))
+  where filename = "log.db"
  
 respondRoute :: ResponseType Route -> HTTP.ServerResponse -> Aff Unit
 respondRoute (Ok (TextHTML (InsertMessage message))) = \res -> liftEffect $ do
@@ -135,6 +144,10 @@ respondRoute (BadRequest _) = \res -> liftEffect $ do
   _ <- HTTP.writeHead 400 $ res
   _ <- HTTP.end $ res
   pure unit  
+respondRoute (InternalServerError _) = \res -> liftEffect $ do
+  _ <- HTTP.writeHead 500 $ res
+  _ <- HTTP.end $ res
+  pure unit
 
 producer :: HTTP.Server -> Producer HTTP.Request Aff Unit
 producer server = produce \emitter -> do
