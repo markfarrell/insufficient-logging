@@ -56,11 +56,11 @@ interpret (Close database next) = do
   result <- lift $ next <$> SQLite3.close database
   lift $ pure result
 interpret (Connect filename mode next) = do
-  _      <- tell [show ["CONNECT",filename,show mode]]
+  _      <- tell ["CONNECT " <> filename <> " " <> show mode]
   result <- lift $ next <$> SQLite3.connect filename mode
   lift $ pure result 
 interpret (All query database next) = do
-  _      <- tell [show ["ALL",query]]
+  _      <- tell ["ALL " <> query]
   result <- lift $ next <$> SQLite3.all query database
   lift $ pure result
  

@@ -30,7 +30,7 @@ import SQLite3 as SQLite3
 
 data MessageType = Success | Failure
 
-data MessageID = DatabaseRequest | RouteRequest
+data MessageID = DatabaseRequest | RouteRequest | RouteResponse
 
 data Message = Message MessageType MessageID String
 
@@ -41,10 +41,11 @@ instance showMessageType :: Show MessageType where
 instance showMessageID :: Show MessageID where
   show DatabaseRequest = "DATABASE-REQUEST"
   show RouteRequest    = "ROUTE-REQUEST"
+  show RouteResponse   = "ROUTE-RESPONSE"
 
 instance showMessage :: Show Message where
-  show (Message ty id msg) = "Message " <> show [show ty, show id, msg] 
- 
+  show (Message ty id msg) = "Message " <> show ty <> " " <> show id <> " " <> show msg  
+
 audit :: Message -> Aff Unit
 audit = liftEffect <<< Console.log <<< show
   
@@ -54,7 +55,7 @@ insertMessage filename (Message ty id msg) = do
   _ <- DB.all query database
   _ <- DB.close database
   lift $ pure unit
-  where query = "INSERT INTO Messages (type,id,msg) VALUES (" <> show [show ty, show id, msg] <> ")" 
+  where query = "INSERT INTO Messages(type,id,msg) VALUES ('" <> show ty <> "','" <> show id  <> "','" <> msg <> "')" 
 
 data Route = InsertMessage Message
  
@@ -74,10 +75,11 @@ parseMessageID :: Parser String MessageID
 parseMessageID = do
   _ <- string "id"
   _ <- string "="
-  parseDatabaseRequest <|> parseRouteRequest
+  parseDatabaseRequest <|> parseRouteRequest <|> parseRouteResponse
   where
     parseDatabaseRequest = string (show DatabaseRequest) >>= const (pure DatabaseRequest)
     parseRouteRequest = string (show RouteRequest) >>= const (pure RouteRequest)
+    parseRouteResponse = string (show RouteResponse) >>= const (pure RouteResponse)
 
 parseMessageString :: Parser String String
 parseMessageString = do
@@ -162,10 +164,25 @@ consumer = forever $ do
       case routeResult of
         (Left  error)        -> lift $ audit $ Message Failure RouteRequest (show error)
         (Right responseType) -> do
+           _ <- lift $ audit $ Message Success RouteRequest (HTTP.messageURL req)
            responseResult <- lift $ try (respondRoute responseType res)
            case responseResult of
-             (Left error')   -> lift $ audit $ Message Failure RouteRequest (show error')
-             (Right _)       -> lift $ audit $ Message Success RouteRequest (show responseType) 
+             (Left error')   -> lift $ audit $ Message Failure RouteResponse (show error')
+             (Right _)       -> lift $ audit $ Message Success RouteResponse (show responseType) 
+
+process :: HTTP.Server -> Process Aff Unit
+process server = pullFrom consumer $ producer server
+
+launchProcess :: HTTP.Server -> Effect Unit
+launchProcess server = void $ launchAff $ do
+  runProcess $ process server
+
+launchServer :: Int -> Effect Unit
+launchServer port = do
+  server <- HTTP.createServer
+  _ <- launchProcess $ server
+  _ <- HTTP.listen port $ server
+  pure unit
 
 main :: Effect Unit
-main = void $ launchAff $ pure unit
+main = void $ launchServer 3000
