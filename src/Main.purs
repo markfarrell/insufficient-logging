@@ -28,6 +28,8 @@ import DB as DB
 import HTTP as HTTP
 import SQLite3 as SQLite3
 
+foreign import decodeURI :: String -> String
+
 data MessageType = Success | Failure
 
 data MessageID = DatabaseRequest | RouteRequest | RouteResponse
@@ -85,7 +87,7 @@ parseMessageString :: Parser String String
 parseMessageString = do
   _ <- string "msg"
   _ <- string "="
-  foldMap singleton <$> many anyChar
+  decodeURI <$> foldMap singleton <$> many anyChar
 
 parseMessageQuery :: Parser String Message
 parseMessageQuery = do
@@ -94,7 +96,7 @@ parseMessageQuery = do
   id <- parseMessageID
   _ <- string "&"
   msg <- parseMessageString
-  pure $ Message ty id msg
+  pure $ Message ty id (decodeURI msg)
 
 parseInsertMessage :: Parser String Route
 parseInsertMessage = do
@@ -120,7 +122,7 @@ instance showResponseType :: (Show a) => Show (ResponseType a) where
 
 runRoute :: HTTP.IncomingMessage -> Aff (ResponseType Route)
 runRoute req  = do
-  result <- pure $ flip runParser parseRoute $ HTTP.messageURL req
+  result <-  pure $ flip runParser parseRoute $ (HTTP.messageURL req) 
   case result of
     (Left _)                        -> pure $ BadRequest (HTTP.messageURL req)
     (Right (InsertMessage message)) -> do
