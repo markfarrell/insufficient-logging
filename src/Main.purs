@@ -56,13 +56,12 @@ log :: String -> Aff Unit
 log = liftEffect <<< Console.log
 
 audit :: Message -> Aff Unit
-audit (Message ty id msg) = do
-  result <- DB.runRequest $ insertMessage filename message
-  case result of
-    (Left  e) -> log $ "AUDIT-FAILURE " <> show message <> show e
-    (Right _) -> log $ "AUDIT-SUCCESS " <> show message <> " " <> " " <> show id <> " " <> show msg
-  where 
-   message  = (Message ty id (encodeBase64 msg))
+audit message = do
+  _ <- DB.runRequest $ insertMessage filename (encodeMessage message)
+  _ <- log $ show message
+  pure unit
+  where
+   encodeMessage (Message ty id msg) = (Message ty id (encodeBase64 msg))
    filename = "audit.db"
 
 insertMessage :: String -> Message -> DB.Request Unit
