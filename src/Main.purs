@@ -106,21 +106,21 @@ parseRoute = parseInsertMessage
 
 data ContentType a = TextHTML a
 
-data ResponseType a = Ok (ContentType a) | BadRequest
+data ResponseType a = Ok (ContentType a) | BadRequest String
 
 instance showContentType :: (Show a) => Show (ContentType a) where
   show (TextHTML x) = "TextHTML (" <> show x <> ")"
 
 instance showResponseType :: (Show a) => Show (ResponseType a) where
   show (Ok x)       = "Ok (" <> show x <> ")"
-  show (BadRequest) = "BadRequest"
+  show (BadRequest path) = "BadRequest " <> show path
 
 runRoute :: HTTP.IncomingMessage -> Aff (ResponseType Route)
 runRoute req  = do
   result <- pure $ flip runParser parseRoute $ HTTP.messageURL req
   case result of
     (Left error)  -> do
-      pure $ BadRequest
+      pure $ BadRequest (HTTP.messageURL req)
     (Right route) -> do
       pure $ Ok (TextHTML route)
  
@@ -132,7 +132,7 @@ respondRoute (Ok (TextHTML (InsertMessage message))) = \res -> liftEffect $ do
   _ <- HTTP.end $ res
   pure unit
   where body = show (InsertMessage message)
-respondRoute (BadRequest) = \res -> liftEffect $ do
+respondRoute (BadRequest _) = \res -> liftEffect $ do
   _ <- HTTP.writeHead 400 $ res
   _ <- HTTP.end $ res
   pure unit  
@@ -149,7 +149,11 @@ consumer = forever $ do
       routeResult <- lift $ try (runRoute req)
       case routeResult of
         (Left  error)        -> lift $ audit $ Message Failure RouteRequest (show error)
-        (Right responseType) -> lift $ audit $ Message Success RouteRequest (show responseType)
+        (Right responseType) -> do
+           responseResult <- lift $ try (respondRoute responseType res)
+           case responseResult of
+             (Left error')   -> lift $ audit $ Message Failure RouteRequest (show error')
+             (Right _)       -> lift $ audit $ Message Success RouteRequest (show responseType) 
 
 main :: Effect Unit
 main = void $ launchAff $ pure unit
