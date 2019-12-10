@@ -30,6 +30,10 @@ import SQLite3 as SQLite3
 
 foreign import decodeURI :: String -> String
 
+foreign import decodeURIComponent :: String -> String
+
+foreign import encodeBase64 :: String -> String
+
 data MessageType = Success | Failure
 
 data MessageID = DatabaseRequest | RouteRequest | RouteResponse
@@ -48,9 +52,19 @@ instance showMessageID :: Show MessageID where
 instance showMessage :: Show Message where
   show (Message ty id msg) = "Message " <> show ty <> " " <> show id <> " " <> show msg  
 
+log :: String -> Aff Unit
+log = liftEffect <<< Console.log
+
 audit :: Message -> Aff Unit
-audit = liftEffect <<< Console.log <<< show
-  
+audit (Message ty id msg) = do
+  result <- DB.runRequest $ insertMessage filename message
+  case result of
+    (Left  e) -> log $ "AUDIT-FAILURE " <> show message <> show e
+    (Right _) -> log $ "AUDIT-SUCCESS " <> show message <> " " <> " " <> show id <> " " <> show msg
+  where 
+   message  = (Message ty id (encodeBase64 msg))
+   filename = "audit.db"
+
 insertMessage :: String -> Message -> DB.Request Unit
 insertMessage filename (Message ty id msg) = do
   database <- DB.connect filename SQLite3.OpenReadWrite
@@ -95,8 +109,8 @@ parseMessageQuery = do
   _ <- string "&"
   id <- parseMessageID
   _ <- string "&"
-  msg <- parseMessageString
-  pure $ Message ty id (decodeURI msg)
+  msg <- decodeURIComponent <$> parseMessageString
+  pure $ Message ty id msg
 
 parseInsertMessage :: Parser String Route
 parseInsertMessage = do
@@ -118,11 +132,11 @@ instance showContentType :: (Show a) => Show (ContentType a) where
 instance showResponseType :: (Show a) => Show (ResponseType a) where
   show (Ok x)                  = "Ok (" <> show x <> ")"
   show (InternalServerError x) = "InternalServerError (" <> show x <> ")"
-  show (BadRequest path)       = "BadRequest " <> show path
+  show (BadRequest path)       = "BadRequest " <> path
 
 runRoute :: HTTP.IncomingMessage -> Aff (ResponseType Route)
 runRoute req  = do
-  result <-  pure $ flip runParser parseRoute $ (HTTP.messageURL req) 
+  result <-  pure $ flip runParser parseRoute (HTTP.messageURL req) 
   case result of
     (Left _)                        -> pure $ BadRequest (HTTP.messageURL req)
     (Right (InsertMessage message)) -> do
@@ -130,8 +144,8 @@ runRoute req  = do
       case result' of
         (Left error)             -> do 
            _ <- audit $ Message Failure DatabaseRequest (show error) 
-           pure $ InternalServerError (InsertMessage message)
-        (Right (Tuple _ steps)) -> do
+           pure $ InternalServerError $ (InsertMessage message)
+        (Right (Tuple rows steps)) -> do
            _ <- audit $ Message Success DatabaseRequest (show steps) 
            pure $ Ok (TextHTML (InsertMessage message))
   where filename = "log.db"
@@ -166,7 +180,9 @@ consumer = forever $ do
       case routeResult of
         (Left  error)        -> lift $ audit $ Message Failure RouteRequest (show error)
         (Right responseType) -> do
-           _ <- lift $ audit $ Message Success RouteRequest (HTTP.messageURL req)
+           _ <- case responseType of
+                  (Ok _) -> lift $ audit $ Message Success RouteRequest (HTTP.messageURL req)
+                  _      -> lift $ audit $ Message Failure RouteRequest (HTTP.messageURL req)
            responseResult <- lift $ try (respondRoute responseType res)
            case responseResult of
              (Left error')   -> lift $ audit $ Message Failure RouteResponse (show error')
