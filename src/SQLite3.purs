@@ -12,13 +12,17 @@ import Prelude
 import Effect.Aff (Aff)
 import Effect.Aff.Compat (EffectFnAff, fromEffectFnAff)
 
-data Mode = OpenReadOnly
+data Mode = OpenReadOnly | OpenCreate | OpenReadWrite
 
 instance showMode :: Show Mode where
   show OpenReadOnly = "OPEN_READONLY"
+  show OpenCreate = "OPEN_CREATE"
+  show OpenReadWrite = "OPEN_READWRITE"
 
 mode' :: Mode -> Int
 mode' OpenReadOnly = 1
+mode' OpenCreate = 4
+mode' OpenReadWrite = 2 
 
 foreign import data Database :: Type
 foreign import data Row :: Type
