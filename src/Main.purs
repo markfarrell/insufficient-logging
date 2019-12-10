@@ -10,7 +10,6 @@ import Control.Monad.Rec.Class (forever)
 import Control.Monad.Trans.Class (lift)
 
 import Data.Either(Either(..))
-import Data.Tuple(Tuple(..))
 
 import Effect (Effect)
 import Effect.Aff (Aff, launchAff)
@@ -121,8 +120,8 @@ runRoute req  = do
   case result of
     (Left error)  -> do
       pure $ BadRequest (HTTP.messageURL req)
-    (Right route) -> do
-      pure $ Ok (TextHTML route)
+    (Right (InsertMessage message)) -> do
+      pure $ Ok (TextHTML (InsertMessage message))
  
 respondRoute :: ResponseType Route -> HTTP.ServerResponse -> Aff Unit
 respondRoute (Ok (TextHTML (InsertMessage message))) = \res -> liftEffect $ do
@@ -137,15 +136,15 @@ respondRoute (BadRequest _) = \res -> liftEffect $ do
   _ <- HTTP.end $ res
   pure unit  
 
-producer :: HTTP.Server -> Producer (Tuple HTTP.IncomingMessage HTTP.ServerResponse) Aff Unit
+producer :: HTTP.Server -> Producer HTTP.Request Aff Unit
 producer server = produce \emitter -> do
-  HTTP.onRequest (\req res -> emit emitter $ Tuple req res) $ server
+  HTTP.onRequest (\req res -> emit emitter $ HTTP.Request req res) $ server
 
-consumer :: Consumer (Tuple HTTP.IncomingMessage HTTP.ServerResponse) Aff Unit
+consumer :: Consumer HTTP.Request Aff Unit
 consumer = forever $ do
   request <- await
   case request of
-    Tuple req res -> do
+    (HTTP.Request req res) -> do
       routeResult <- lift $ try (runRoute req)
       case routeResult of
         (Left  error)        -> lift $ audit $ Message Failure RouteRequest (show error)
